@@ -598,6 +598,9 @@ yarn.lock
 
 # Docker
 /docker/mysql/data/
+
+# setup script
+setup.ps1
 "@
     Write-Host "Created .gitignore file" -ForegroundColor Green
 }
@@ -606,41 +609,49 @@ yarn.lock
 $helperCommands = @"
 # Helper commands for WordPress development
 
+function Test-WordPressDevEnvironment {
+    # Check if we're in a WordPress plugin dev directory
+    if (!(Test-Path "docker-compose.yml")) {
+        Write-Host "Error: This command must be run from a WordPress plugin development directory containing docker-compose.yml" -ForegroundColor Red
+        return `$false
+    }
+    
+    # Verify it's our specific docker-compose setup by checking for key services
+    `$dockerCompose = Get-Content "docker-compose.yml" -Raw
+    if (!(`$dockerCompose -match "wordpress:" -and `$dockerCompose -match "phpmyadmin:" -and `$dockerCompose -match "db:")) {
+        Write-Host "Error: This directory doesn't appear to be a WordPress plugin development environment" -ForegroundColor Red
+        return `$false
+    }
+    
+    return `$true
+}
+
 function wp-clean {
-    if (Test-Path docker-compose.yml) {
+    if (Test-WordPressDevEnvironment) {
         docker-compose down -v
         docker-compose up -d --build
-    } else {
-        Write-Host "Error: docker-compose.yml not found in current directory" -ForegroundColor Red
     }
 }
 
 function wp-reset {
-    if (Test-Path docker-compose.yml) {
+    if (Test-WordPressDevEnvironment) {
         docker-compose exec wordpress wp db reset --yes --allow-root
         docker-compose exec wordpress wp core install --allow-root --url=localhost:8080 --title="WordPress Dev" --admin_user=admin --admin_password=password --admin_email=admin@example.com
-    } else {
-        Write-Host "Error: docker-compose.yml not found in current directory" -ForegroundColor Red
     }
 }
 
 function wp-plugin-list {
-    if (Test-Path docker-compose.yml) {
+    if (Test-WordPressDevEnvironment) {
         docker-compose exec wordpress wp plugin list --allow-root
-    } else {
-        Write-Host "Error: docker-compose.yml not found in current directory" -ForegroundColor Red
     }
 }
 
 function wp-install-theme {
-    if (Test-Path docker-compose.yml) {
+    if (Test-WordPressDevEnvironment) {
         docker-compose exec wordpress wp theme install twentytwentyfour --activate --allow-root
-    } else {
-        Write-Host "Error: docker-compose.yml not found in current directory" -ForegroundColor Red
     }
 }
 
-# Add function to change to plugin directory
 function wp-cd {
     param(
         [Parameter(Mandatory=`$false)]
@@ -661,6 +672,10 @@ function wp-cd {
     foreach (`$path in `$searchPaths) {
         if (Test-Path `$path) {
             `$found = Get-ChildItem -Path `$path -Recurse -Filter "docker-compose.yml" -ErrorAction SilentlyContinue | 
+                     Where-Object {
+                         `$content = Get-Content `$_.FullName -Raw
+                         `$content -match "wordpress:" -and `$content -match "phpmyadmin:" -and `$content -match "db:"
+                     } |
                      Select-Object -First 1
             if (`$found) {
                 Set-Location `$found.Directory
@@ -670,12 +685,12 @@ function wp-cd {
         }
     }
     
-    Write-Host "Error: Could not find WordPress plugin directory with docker-compose.yml" -ForegroundColor Red
+    Write-Host "Error: Could not find WordPress plugin development directory" -ForegroundColor Red
 }
 
-# Add function to show help
 function wp-help {
     Write-Host "WordPress Development Commands:" -ForegroundColor Cyan
+    Write-Host "These commands must be run from within a WordPress plugin development directory:" -ForegroundColor Yellow
     Write-Host "wp-cd [path]  : Change to plugin directory (optional: specify path)" -ForegroundColor Yellow
     Write-Host "wp-clean     : Rebuild containers from scratch" -ForegroundColor Yellow
     Write-Host "wp-reset     : Reset WordPress database and reinstall" -ForegroundColor Yellow
